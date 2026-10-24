@@ -1,0 +1,19 @@
+{
+  "version": "0.1.0",
+  "components": {
+    "app": {
+      "url": "https://github.com/{repo}/releases/latest/download/JhFastYT-win-x64.zip",
+      "dest": "app"
+    },
+    "ffmpeg": {
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+      "dest": "tools",
+      "files": ["ffmpeg.exe", "ffprobe.exe"]
+    },
+    "deno": {
+      "url": "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip",
+      "dest": "tools",
+      "files": ["deno.exe"]
+    }
+  }
+}

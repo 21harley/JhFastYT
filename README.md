@@ -44,3 +44,5 @@ Publicar una versión: `git tag v0.1.0 && git push --tags`. El workflow compila 
 Si YouTube cambia algo y la descarga falla, actualiza `yt-dlp` (`pip install -U yt-dlp`) y publica un release nuevo: `yt-dlp` va dentro del `.exe`.
 
 Si la app falla al abrir, el error queda en `data\error.log`.
+
+Si YouTube responde "Sign in to confirm you're not a bot", elige en el menú de la app el navegador donde tienes sesión de YouTube iniciada (Firefox suele ser el que mejor funciona; Chrome y Edge pueden fallar mientras están abiertos).

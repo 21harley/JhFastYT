@@ -28,12 +28,17 @@ if sys.stderr is None:  # exe sin consola: yt-dlp escribe a stderr
     sys.stdout = sys.stderr = open(os.devnull, "w")
 
 
+BROWSER = ""  # navegador del que yt-dlp toma cookies; "" = ninguno
+
+
 def yt_opts():
     """Opciones comunes de yt-dlp; usa tools/ si existe, si no lo que haya en el PATH."""
     deno = TOOLS / "deno.exe"
     o = {"quiet": True, "noplaylist": True, "js_runtimes": {"deno": {"path": str(deno)}} if deno.exists() else {"node": {}}}
     if (TOOLS / "ffmpeg.exe").exists():
         o["ffmpeg_location"] = str(TOOLS)
+    if BROWSER:
+        o["cookiesfrombrowser"] = (BROWSER,)
     return o
 
 
@@ -139,6 +144,10 @@ class Item(ctk.CTkFrame):
 
 
 class App(ctk.CTk):
+    def set_browser(self, v):
+        global BROWSER
+        BROWSER = "" if v == "Sin cookies" else v
+
     def __init__(self):
         super().__init__()
         self.title("JhFastYT")
@@ -164,6 +173,9 @@ class App(ctk.CTk):
         folder.columnconfigure(1, weight=1)
         ctk.CTkButton(folder, text="📁", width=36, command=self.pick).grid(row=0, column=0, padx=10, pady=8)
         ctk.CTkLabel(folder, textvariable=self.out, anchor="w", text_color="#9a9aa5").grid(row=0, column=1, sticky="ew", padx=4)
+        # Si YouTube pide "confirma que no eres un bot", elegir el navegador donde ya iniciaste sesión.
+        ctk.CTkOptionMenu(folder, values=["Sin cookies", "firefox", "edge", "chrome", "brave"], width=110,
+                          command=self.set_browser).grid(row=0, column=2, padx=10)
 
         tabs = ctk.CTkTabview(self, fg_color="transparent", segmented_button_selected_color=ACCENT,
                               segmented_button_selected_hover_color=HOVER)

@@ -5,7 +5,7 @@
 
 [Setup]
 AppName=JhFastYT
-AppVersion=0.1.0
+AppVersion=0.1.1
 DefaultDirName={localappdata}\JhFastYT
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes

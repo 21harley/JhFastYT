@@ -45,4 +45,4 @@ Si YouTube cambia algo y la descarga falla, actualiza `yt-dlp` (`pip install -U 
 
 Si la app falla al abrir, el error queda en `data\error.log`.
 
-Si YouTube responde "Sign in to confirm you're not a bot", elige en el menú de la app el navegador donde tienes sesión de YouTube iniciada (Firefox suele ser el que mejor funciona; Chrome y Edge pueden fallar mientras están abiertos).
+Si YouTube responde "Sign in to confirm you're not a bot", pulsa **Iniciar sesión** en la app, entra con tu cuenta de Google y la ventana se cierra sola. La sesión vive solo en memoria mientras la app está abierta: no se guarda nada en disco y al cerrar la app hay que iniciar sesión de nuevo. **Cerrar sesión** la descarta antes. Conviene usar una cuenta secundaria.

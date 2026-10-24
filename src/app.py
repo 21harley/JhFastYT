@@ -1,6 +1,9 @@
 import io
 import os
+import http.cookiejar
+import json
 import sqlite3
+import subprocess
 import sys
 import threading
 import urllib.request
@@ -28,17 +31,12 @@ if sys.stderr is None:  # exe sin consola: yt-dlp escribe a stderr
     sys.stdout = sys.stderr = open(os.devnull, "w")
 
 
-BROWSER = ""  # navegador del que yt-dlp toma cookies; "" = ninguno
-
-
 def yt_opts():
     """Opciones comunes de yt-dlp; usa tools/ si existe, si no lo que haya en el PATH."""
     deno = TOOLS / "deno.exe"
     o = {"quiet": True, "noplaylist": True, "js_runtimes": {"deno": {"path": str(deno)}} if deno.exists() else {"node": {}}}
     if (TOOLS / "ffmpeg.exe").exists():
         o["ffmpeg_location"] = str(TOOLS)
-    if BROWSER:
-        o["cookiesfrombrowser"] = (BROWSER,)
     return o
 
 
@@ -58,6 +56,19 @@ def q(sql, *args):
 q("""CREATE TABLE IF NOT EXISTS videos(
     id TEXT PRIMARY KEY, url TEXT, title TEXT, uploader TEXT, duration INT, thumb BLOB,
     status TEXT, fmt TEXT, added_at TEXT, downloaded_at TEXT)""")
+
+
+SESSION = []  # cookies de YouTube solo en memoria: se pierden al cerrar la app
+
+
+def ydl(opts):
+    """YoutubeDL con las cookies de la sesión cargadas solo en memoria (nunca en disco)."""
+    y = yt_dlp.YoutubeDL(opts)
+    for c in SESSION:
+        y.cookiejar.set_cookie(http.cookiejar.Cookie(
+            0, c["name"], c["value"], None, False, c["domain"], True, c["domain"].startswith("."), c["path"], True,
+            c["secure"], c["expires"] or None, not c["expires"], None, None, {}))
+    return y
 
 
 def fmt_duration(s):
@@ -144,9 +155,22 @@ class Item(ctk.CTkFrame):
 
 
 class App(ctk.CTk):
-    def set_browser(self, v):
-        global BROWSER
-        BROWSER = "" if v == "Sin cookies" else v
+    def toggle_login(self):
+        if SESSION:
+            SESSION.clear()
+            self.login_btn.configure(text="Iniciar sesión")
+            return
+        self.login_btn.configure(text="Esperando login...", state="disabled")
+        cmd = [sys.executable, "--login"] if getattr(sys, "frozen", False) else [sys.executable, __file__, "--login"]
+
+        def run():
+            out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+            if out.strip():
+                SESSION[:] = json.loads(out.strip().splitlines()[-1])
+            self.after(0, lambda: self.login_btn.configure(
+                state="normal", text="Cerrar sesión" if bool(SESSION) else "Iniciar sesión"))
+
+        threading.Thread(target=run, daemon=True).start()
 
     def __init__(self):
         super().__init__()
@@ -173,9 +197,10 @@ class App(ctk.CTk):
         folder.columnconfigure(1, weight=1)
         ctk.CTkButton(folder, text="📁", width=36, command=self.pick).grid(row=0, column=0, padx=10, pady=8)
         ctk.CTkLabel(folder, textvariable=self.out, anchor="w", text_color="#9a9aa5").grid(row=0, column=1, sticky="ew", padx=4)
-        # Si YouTube pide "confirma que no eres un bot", elegir el navegador donde ya iniciaste sesión.
-        ctk.CTkOptionMenu(folder, values=["Sin cookies", "firefox", "edge", "chrome", "brave"], width=110,
-                          command=self.set_browser).grid(row=0, column=2, padx=10)
+        # Si YouTube pide "confirma que no eres un bot", iniciar sesión guarda las cookies para yt-dlp.
+        self.login_btn = ctk.CTkButton(folder, text="Cerrar sesión" if bool(SESSION) else "Iniciar sesión", width=130,
+                                       fg_color=ACCENT, hover_color=HOVER, command=self.toggle_login)
+        self.login_btn.grid(row=0, column=2, padx=10)
 
         tabs = ctk.CTkTabview(self, fg_color="transparent", segmented_button_selected_color=ACCENT,
                               segmented_button_selected_hover_color=HOVER)
@@ -265,7 +290,7 @@ class App(ctk.CTk):
 
     def fetch(self, item):
         try:
-            with yt_dlp.YoutubeDL({**yt_opts(), "skip_download": True}) as y:
+            with ydl({**yt_opts(), "skip_download": True}) as y:
                 info = y.extract_info(item.row["url"], download=False)
             thumb = None
             try:
@@ -328,7 +353,7 @@ class App(ctk.CTk):
         for item in todo:
             label = item.label()
             try:
-                with yt_dlp.YoutubeDL(self.opts(item)) as y:
+                with ydl(self.opts(item)) as y:
                     y.download([item.row["url"]])
                 self.after(0, self.mark_done, item, label)
             except Exception as e:
@@ -349,7 +374,37 @@ class App(ctk.CTk):
         self.place("Descargados", Item(self.lists["Descargados"], row, self.remove, self.requeue), top=True)
 
 
+def login_window():
+    """Proceso aparte (webview y tkinter no comparten hilo principal): login en Google y imprime las cookies por stdout (sin tocar disco)."""
+    import webview
+    from email.utils import parsedate_to_datetime
+
+    w = webview.create_window("Iniciar sesión en YouTube", "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://www.youtube.com/")
+
+    def saved():
+        if "youtube.com" not in (w.get_current_url() or ""):
+            return
+        rows = []
+        for c in w.get_cookies():
+            for m in c.values():
+                try:
+                    exp = int(parsedate_to_datetime(m["expires"]).timestamp()) if m["expires"] else 0
+                except (ValueError, OverflowError):
+                    exp = 0
+                rows.append({"name": m.key, "value": m.value, "domain": m["domain"], "path": m["path"] or "/",
+                             "secure": bool(m["secure"]), "expires": max(exp, 0)})
+        if any(r["name"] == "SAPISID" for r in rows):
+            os.write(1, json.dumps(rows).encode())
+            w.destroy()
+
+    w.events.loaded += saved
+    webview.start()
+
+
 if __name__ == "__main__":
+    if "--login" in sys.argv:
+        login_window()
+        sys.exit()
     try:
         App().mainloop()
     except Exception:

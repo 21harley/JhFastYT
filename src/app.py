@@ -58,7 +58,59 @@ q("""CREATE TABLE IF NOT EXISTS videos(
     status TEXT, fmt TEXT, added_at TEXT, downloaded_at TEXT)""")
 
 
-SESSION = []  # cookies de YouTube solo en memoria: se pierden al cerrar la app
+SESSION = []  # cookies de YouTube en memoria; solo van a disco si el usuario marca "Mantener sesión abierta"
+q("CREATE TABLE IF NOT EXISTS session(id INTEGER PRIMARY KEY CHECK(id=1), cookies BLOB)")
+
+
+def dpapi(data, protect):
+    """Cifra/descifra con DPAPI de Windows: solo este usuario de Windows puede leerlo."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _Blob(ctypes.Structure):
+        _fields_ = [("n", wintypes.DWORD), ("p", ctypes.POINTER(ctypes.c_char))]
+
+    buf = ctypes.create_string_buffer(data, len(data))
+    src, out = _Blob(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), _Blob()
+    f = ctypes.windll.crypt32.CryptProtectData if protect else ctypes.windll.crypt32.CryptUnprotectData
+    if not f(ctypes.byref(src), None, None, None, None, 0, ctypes.byref(out)):
+        raise OSError("DPAPI falló")
+    res = ctypes.string_at(out.p, out.n)
+    ctypes.windll.kernel32.LocalFree(ctypes.cast(out.p, ctypes.c_void_p))
+    return res
+
+
+def seal(data, protect):
+    """Windows: DPAPI. Linux/macOS: Fernet con la clave guardada en el llavero del sistema (keyring)."""
+    if sys.platform == "win32":
+        return dpapi(data, protect)
+    import keyring
+    from cryptography.fernet import Fernet, InvalidToken
+
+    key = keyring.get_password("JhFastYT", "session-key")
+    if not key:
+        key = Fernet.generate_key().decode()
+        keyring.set_password("JhFastYT", "session-key", key)
+    f = Fernet(key)
+    try:
+        return f.encrypt(data) if protect else f.decrypt(data)
+    except InvalidToken as e:
+        raise OSError("clave no coincide") from e
+
+
+def save_session(keep):
+    if keep and SESSION:
+        q("INSERT OR REPLACE INTO session VALUES(1, ?)", seal(json.dumps(SESSION).encode(), True))
+    else:
+        q("DELETE FROM session")
+
+
+_row = q("SELECT cookies FROM session")
+if _row:
+    try:
+        SESSION[:] = json.loads(seal(_row[0]["cookies"], False))
+    except (OSError, ValueError):  # otro usuario/equipo o dato corrupto
+        q("DELETE FROM session")
 
 
 def ydl(opts):
@@ -127,7 +179,9 @@ class Item(ctk.CTkFrame):
         r = ctk.CTkFrame(self, fg_color="#17171c", corner_radius=10)
         r.grid(row=3, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
         r.columnconfigure(3, weight=1)
-        ctk.CTkSegmentedButton(r, values=["Video", "Audio"], variable=self.mode, command=self.on_mode,
+        ctk.CTkSegmentedButton(r, values=["Video", "Audio"], variable=self.mode, command=self.on_mode, height=32,
+                               corner_radius=8, font=ctk.CTkFont(weight="bold"), fg_color="#26262e",
+                               unselected_color="#26262e", unselected_hover_color="#33333d",
                                selected_color=ACCENT, selected_hover_color=HOVER).grid(row=0, column=0, padx=8, pady=8)
         self.fmt_box = ctk.CTkOptionMenu(r, values=VIDEO_FORMATS, variable=self.fmt, width=80)
         self.fmt_box.grid(row=0, column=1, padx=4)
@@ -158,6 +212,7 @@ class App(ctk.CTk):
     def toggle_login(self):
         if SESSION:
             SESSION.clear()
+            save_session(False)
             self.login_btn.configure(text="Iniciar sesión")
             return
         self.login_btn.configure(text="Esperando login...", state="disabled")
@@ -167,6 +222,7 @@ class App(ctk.CTk):
             out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
             if out.strip():
                 SESSION[:] = json.loads(out.strip().splitlines()[-1])
+                save_session(self.keep.get())
             self.after(0, lambda: self.login_btn.configure(
                 state="normal", text="Cerrar sesión" if bool(SESSION) else "Iniciar sesión"))
 
@@ -201,9 +257,14 @@ class App(ctk.CTk):
         self.login_btn = ctk.CTkButton(folder, text="Cerrar sesión" if bool(SESSION) else "Iniciar sesión", width=130,
                                        fg_color=ACCENT, hover_color=HOVER, command=self.toggle_login)
         self.login_btn.grid(row=0, column=2, padx=10)
+        self.keep = ctk.BooleanVar(value=bool(_row and SESSION))
+        ctk.CTkCheckBox(folder, text="Mantener sesión abierta", variable=self.keep, fg_color=ACCENT, hover_color=HOVER,
+                        command=lambda: save_session(self.keep.get())).grid(row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 8))
 
         tabs = ctk.CTkTabview(self, fg_color="transparent", segmented_button_selected_color=ACCENT,
-                              segmented_button_selected_hover_color=HOVER)
+                              segmented_button_selected_hover_color=HOVER, segmented_button_fg_color="#17171c",
+                              segmented_button_unselected_color="#17171c", segmented_button_unselected_hover_color="#2a2a33")
+        tabs._segmented_button.configure(height=38, corner_radius=10, font=ctk.CTkFont(size=13, weight="bold"))
         tabs.grid(row=2, column=0, sticky="nsew", padx=8)
         self.tabs = tabs
         self.lists, self.empties = {}, {}

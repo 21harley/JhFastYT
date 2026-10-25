@@ -2,3 +2,5 @@ yt-dlp[default]
 customtkinter
 pillow
 pywebview
+cryptography; sys_platform != "win32"
+keyring; sys_platform != "win32"
